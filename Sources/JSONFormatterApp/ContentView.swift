@@ -1,15 +1,26 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 import JSONCore
 
 enum StatusKind {
     case none, success, error
 }
 
+extension Notification.Name {
+    static let jfOpenFile = Notification.Name("jfOpenFile")
+    static let jfSaveOutput = Notification.Name("jfSaveOutput")
+    static let jfSaveOutputAs = Notification.Name("jfSaveOutputAs")
+}
+
 struct ContentView: View {
-    @State private var inputText: String = ContentView.sampleInput
+    // Persisted across launches so you don't lose your place.
+    @AppStorage("jsonformatter.inputText") private var inputText: String = ContentView.sampleInput
+    @AppStorage("jsonformatter.indentWidth") private var indentWidth: Int = 2
+
     @State private var outputText: String = ""
-    @State private var indentWidth: Int = 2
+    @State private var openedFileURL: URL?
+    @State private var outputSaveURL: URL?
 
     @State private var statusKind: StatusKind = .none
     @State private var statusTitle: String = ""
@@ -36,11 +47,22 @@ struct ContentView: View {
                 fixesView
             }
             HSplitView {
-                editorPane(title: "Input", text: $inputText)
-                editorPane(title: "Output", text: $outputText)
+                editorPane(title: inputPaneTitle, text: $inputText)
+                editorPane(title: outputPaneTitle, text: $outputText)
             }
         }
         .padding()
+        .onReceive(NotificationCenter.default.publisher(for: .jfOpenFile)) { _ in openFile() }
+        .onReceive(NotificationCenter.default.publisher(for: .jfSaveOutput)) { _ in saveOutput() }
+        .onReceive(NotificationCenter.default.publisher(for: .jfSaveOutputAs)) { _ in saveOutputAs() }
+    }
+
+    private var inputPaneTitle: String {
+        openedFileURL.map { "Input — \($0.lastPathComponent)" } ?? "Input"
+    }
+
+    private var outputPaneTitle: String {
+        outputSaveURL.map { "Output — \($0.lastPathComponent)" } ?? "Output"
     }
 
     // MARK: - Header
@@ -63,6 +85,10 @@ struct ContentView: View {
 
     private var buttonRow: some View {
         HStack(spacing: 10) {
+            Button("Open…", action: openFile)
+            Button("Save", action: saveOutput)
+                .disabled(outputText.isEmpty)
+            Divider().frame(height: 18)
             Button("Validate", action: runValidate)
             Button("Format", action: runFormat)
             Button("Auto-Fix", action: runAutoFix)
@@ -122,8 +148,8 @@ struct ContentView: View {
     private func editorPane(title: String, text: Binding<String>) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title).font(.headline)
-            TextEditor(text: text)
-                .font(.system(.body, design: .monospaced))
+            CodeEditor(text: text)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .border(Color.gray.opacity(0.3))
         }
         .frame(minWidth: 400)
@@ -209,8 +235,54 @@ struct ContentView: View {
         }
     }
 
+    private func openFile() {
+        let panel = NSOpenPanel()
+        panel.title = "Open JSON File"
+        panel.allowedContentTypes = [.json, .plainText]
+        panel.allowsOtherFileTypes = true
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            inputText = try String(contentsOf: url, encoding: .utf8)
+            openedFileURL = url
+            statusKind = .none
+            statusDetail = ""
+            fixNotes = []
+        } catch {
+            showGenericError(error)
+        }
+    }
+
+    private func saveOutput() {
+        if let url = outputSaveURL {
+            writeOutput(to: url)
+        } else {
+            saveOutputAs()
+        }
+    }
+
+    private func saveOutputAs() {
+        let panel = NSSavePanel()
+        panel.title = "Save Formatted JSON"
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = openedFileURL?.lastPathComponent ?? "formatted.json"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        writeOutput(to: url)
+        outputSaveURL = url
+    }
+
+    private func writeOutput(to url: URL) {
+        do {
+            try outputText.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            showGenericError(error)
+        }
+    }
+
     private func useOutputAsInput() {
         inputText = outputText
+        openedFileURL = nil
         statusKind = .none
         fixNotes = []
     }
