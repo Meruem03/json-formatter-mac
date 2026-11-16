@@ -26,6 +26,12 @@ public final class JSONParser {
     private var col: Int = 1
     private let lenient: Bool
     public private(set) var fixes: [AutoFixNote] = []
+    private var depth = 0
+    /// Recursion-depth ceiling. Each `{` or `[` costs a few stack frames;
+    /// without a limit, pathologically deep input (or a tiny stack on a
+    /// background thread) can overflow the call stack and crash instead of
+    /// producing a normal parse error.
+    private let maxDepth = 500
 
     public init(_ text: String, lenient: Bool) {
         self.chars = Array(text)
@@ -198,6 +204,11 @@ public final class JSONParser {
     // MARK: - Object / Array
 
     private func parseObject() throws -> JSONNode {
+        depth += 1
+        defer { depth -= 1 }
+        if depth > maxDepth {
+            throw error("JSON is nested too deeply (over \(maxDepth) levels)", suggestion: "This is likely malformed or an extreme edge case rather than real data.")
+        }
         advance() // consume '{'
         skipWhitespaceAndComments()
         var pairs: [(String, JSONNode)] = []
@@ -254,6 +265,11 @@ public final class JSONParser {
     }
 
     private func parseArray() throws -> JSONNode {
+        depth += 1
+        defer { depth -= 1 }
+        if depth > maxDepth {
+            throw error("JSON is nested too deeply (over \(maxDepth) levels)", suggestion: "This is likely malformed or an extreme edge case rather than real data.")
+        }
         advance() // consume '['
         skipWhitespaceAndComments()
         var items: [JSONNode] = []
@@ -377,15 +393,31 @@ public final class JSONParser {
                 case "'": result.append("'"); advance()
                 case "u":
                     advance()
-                    var hex = ""
-                    for _ in 0..<4 {
-                        guard let h = current(), h.isHexDigit else {
-                            throw error("Invalid \\u escape — expected 4 hex digits")
+                    let high = try readFourHexDigits()
+                    if (0xD800...0xDBFF).contains(high) {
+                        // High surrogate: it must be followed by a matching low
+                        // surrogate \u escape, and the pair combines into one
+                        // scalar (e.g. 😀 -> 😀). A plain
+                        // Unicode.Scalar(high) is invalid on its own.
+                        let savedPos = pos, savedLine = line, savedCol = col
+                        if current() == "\\" && peek(1) == "u" {
+                            advance(); advance()
+                            let low = try readFourHexDigits()
+                            if (0xDC00...0xDFFF).contains(low) {
+                                let combined = 0x10000 + (high - 0xD800) * 0x400 + (low - 0xDC00)
+                                if let scalar = Unicode.Scalar(combined) {
+                                    result.append(Character(scalar))
+                                }
+                            } else {
+                                pos = savedPos; line = savedLine; col = savedCol
+                                try handleLoneSurrogate(high)
+                            }
+                        } else {
+                            try handleLoneSurrogate(high)
                         }
-                        hex.append(h)
-                        advance()
-                    }
-                    if let scalarValue = UInt32(hex, radix: 16), let scalar = Unicode.Scalar(scalarValue) {
+                    } else if (0xDC00...0xDFFF).contains(high) {
+                        try handleLoneSurrogate(high)
+                    } else if let scalar = Unicode.Scalar(high) {
                         result.append(Character(scalar))
                     }
                 default:
@@ -416,6 +448,33 @@ public final class JSONParser {
             }
             result.append(c)
             advance()
+        }
+    }
+
+    private func readFourHexDigits() throws -> UInt32 {
+        var hex = ""
+        for _ in 0..<4 {
+            guard let h = current(), h.isHexDigit else {
+                throw error("Invalid \\u escape — expected 4 hex digits")
+            }
+            hex.append(h)
+            advance()
+        }
+        guard let value = UInt32(hex, radix: 16) else {
+            throw error("Invalid \\u escape — expected 4 hex digits")
+        }
+        return value
+    }
+
+    private func handleLoneSurrogate(_ value: UInt32) throws {
+        let hex = String(format: "%04x", value)
+        if lenient {
+            recordFix("Dropped invalid lone UTF-16 surrogate \\u\(hex) (no matching pair)")
+        } else {
+            throw error(
+                "'\\u\(hex)' is a lone UTF-16 surrogate with no matching pair",
+                suggestion: "Surrogate pairs must appear together, e.g. \\uD83D\\uDE00 for 😀."
+            )
         }
     }
 

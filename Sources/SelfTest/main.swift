@@ -80,4 +80,40 @@ do {
     check("round-trip threw unexpectedly: \(error)", false)
 }
 
+// 7. Surrogate pairs decode to the correct character (regression: used to
+//    silently drop astral-plane characters like emoji).
+do {
+    let text = "[\"\\uD83D\\uDE00\"]"
+    let node = try JSONParser(text, lenient: false).parse()
+    if case .array(let items) = node, case .string(let s) = items.first {
+        check("surrogate pair decodes to emoji", s == "😀")
+    } else {
+        check("surrogate pair decodes to emoji", false)
+    }
+} catch {
+    check("surrogate pair decodes to emoji: threw \(error)", false)
+}
+
+// 8. A lone (unpaired) surrogate is a clear strict error, not silent data loss.
+do {
+    let text = "[\"\\uD83Dnotalow\"]"
+    _ = try JSONParser(text, lenient: false).parse()
+    check("lone surrogate rejected strictly", false)
+} catch let e as JSONParseError {
+    check("lone surrogate rejected strictly", e.message.contains("surrogate"))
+} catch {
+    check("lone surrogate rejected strictly", false)
+}
+
+// 9. Deeply nested JSON reports a clean error instead of crashing.
+do {
+    let text = String(repeating: "[", count: 5000) + String(repeating: "]", count: 5000)
+    _ = try JSONParser(text, lenient: false).parse()
+    check("extreme nesting rejected", false)
+} catch let e as JSONParseError {
+    check("extreme nesting rejected", e.message.contains("nested too deeply"))
+} catch {
+    check("extreme nesting rejected", false)
+}
+
 print(failures == 0 ? "\nALL TESTS PASSED" : "\n\(failures) TEST(S) FAILED")
