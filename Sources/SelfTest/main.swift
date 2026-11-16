@@ -1,0 +1,83 @@
+import JSONCore
+
+var failures = 0
+
+func check(_ name: String, _ condition: Bool) {
+    if condition {
+        print("PASS: \(name)")
+    } else {
+        print("FAIL: \(name)")
+        failures += 1
+    }
+}
+
+// 1. Valid JSON passes strict parse.
+do {
+    let text = "{\"a\": 1, \"b\": [1,2,3]}"
+    _ = try JSONParser(text, lenient: false).parse()
+    check("valid JSON parses strictly", true)
+} catch {
+    check("valid JSON parses strictly", false)
+}
+
+// 2. Trailing comma is rejected strictly, with a location.
+do {
+    let text = "{\"a\": 1,}"
+    _ = try JSONParser(text, lenient: false).parse()
+    check("trailing comma rejected", false)
+} catch let e as JSONParseError {
+    check("trailing comma rejected", e.line == 1 && e.message.lowercased().contains("trailing comma"))
+} catch {
+    check("trailing comma rejected", false)
+}
+
+// 3. Missing comma between properties is reported on the right line/column.
+do {
+    let text = "{\n  \"a\": 1\n  \"b\": 2\n}"
+    _ = try JSONParser(text, lenient: false).parse()
+    check("missing comma rejected", false)
+} catch let e as JSONParseError {
+    check("missing comma rejected", e.line == 3)
+} catch {
+    check("missing comma rejected", false)
+}
+
+// 4. Auto-fix repairs trailing commas, single quotes, unquoted keys, Python literals.
+do {
+    let text = "{ name: 'Ilia', \"age\": 29, \"active\": True, \"tags\": [\"a\", \"b\",], }"
+    let parser = JSONParser(text, lenient: true)
+    let node = try parser.parse()
+    let out = JSONSerializer.serialize(node, indentWidth: 2)
+    check("auto-fix produces valid JSON", (try? JSONParser(out, lenient: false).parse()) != nil)
+    check("auto-fix recorded fixes", parser.fixes.count >= 4)
+    check("auto-fix quoted the key", out.contains("\"name\": \"Ilia\""))
+    check("auto-fix kept true literal", out.contains("\"active\": true"))
+} catch {
+    check("auto-fix path threw unexpectedly: \(error)", false)
+}
+
+// 5. Flatten turns nested structures into dotted-path keys.
+do {
+    let text = "{\"user\":{\"name\":\"Ilia\",\"tags\":[\"a\",\"b\"]},\"count\":2}"
+    let node = try JSONParser(text, lenient: false).parse()
+    let flat = JSONFlatten.flatten(node)
+    let out = JSONSerializer.serialize(flat, indentWidth: 0)
+    check("flatten produces dotted keys", out.contains("\"user.name\":\"Ilia\"") && out.contains("\"user.tags.0\":\"a\""))
+} catch {
+    check("flatten threw unexpectedly: \(error)", false)
+}
+
+// 6. Unflatten reverses flatten exactly (round trip).
+do {
+    let text = "{\"user\":{\"name\":\"Ilia\",\"tags\":[\"a\",\"b\"]},\"count\":2}"
+    let original = try JSONParser(text, lenient: false).parse()
+    let flat = JSONFlatten.flatten(original)
+    let rebuilt = JSONFlatten.unflatten(flat)
+    let originalOut = JSONSerializer.serialize(original, indentWidth: 0)
+    let rebuiltOut = JSONSerializer.serialize(rebuilt, indentWidth: 0)
+    check("flatten -> unflatten round-trips", originalOut == rebuiltOut)
+} catch {
+    check("round-trip threw unexpectedly: \(error)", false)
+}
+
+print(failures == 0 ? "\nALL TESTS PASSED" : "\n\(failures) TEST(S) FAILED")
