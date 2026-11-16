@@ -1,3 +1,4 @@
+import Foundation
 import JSONCore
 
 var failures = 0
@@ -117,3 +118,4 @@ do {
 }
 
 print(failures == 0 ? "\nALL TESTS PASSED" : "\n\(failures) TEST(S) FAILED")
+exit(failures == 0 ? 0 : 1)
