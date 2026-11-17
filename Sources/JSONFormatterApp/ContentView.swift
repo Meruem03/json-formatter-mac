@@ -26,6 +26,7 @@ struct ContentView: View {
     @State private var statusTitle: String = ""
     @State private var statusDetail: String = ""
     @State private var fixNotes: [String] = []
+    @State private var lintNotes: [String] = []
 
     @State private var showMergeSheet = false
     @State private var mergeOverlayText = ""
@@ -49,12 +50,16 @@ struct ContentView: View {
             if !fixNotes.isEmpty {
                 fixesView
             }
+            if !lintNotes.isEmpty {
+                lintView
+            }
             HSplitView {
                 editorPane(title: inputPaneTitle, text: $inputText) {
                     openedFileURL = nil
                     statusKind = .none
                     statusDetail = ""
                     fixNotes = []
+                    lintNotes = []
                 }
                 editorPane(title: outputPaneTitle, text: $outputText) {
                     outputSaveURL = nil
@@ -103,6 +108,7 @@ struct ContentView: View {
                 .disabled(outputText.isEmpty)
             Divider().frame(height: 18)
             Button("Validate", action: runValidate)
+            Button("Lint", action: runLint)
             Button("Format", action: runFormat)
             Button("Auto-Fix", action: runAutoFix)
                 .keyboardShortcut(.defaultAction)
@@ -160,6 +166,26 @@ struct ContentView: View {
         .cornerRadius(8)
     }
 
+    private var lintView: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Lint warnings (\(lintNotes.count)) — valid JSON, but likely a bug:")
+                .font(.subheadline).bold()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(lintNotes.enumerated()), id: \.offset) { _, note in
+                        Text("⚠ \(note)")
+                            .font(.system(.footnote, design: .monospaced))
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 90)
+        }
+        .padding(8)
+        .background(Color.orange.opacity(0.12))
+        .cornerRadius(8)
+    }
+
     // MARK: - Editors
 
     private func editorPane(title: String, text: Binding<String>, onClear: @escaping () -> Void = {}) -> some View {
@@ -185,6 +211,7 @@ struct ContentView: View {
 
     private func runValidate() {
         fixNotes = []
+        lintNotes = []
         do {
             _ = try JSONParser(inputText, lenient: false).parse()
             statusKind = .success
@@ -197,8 +224,30 @@ struct ContentView: View {
         }
     }
 
+    /// Flags things that are valid JSON but are almost always a bug:
+    /// duplicate keys in the same object (most parsers silently keep
+    /// only the last one) and integers with more digits than a
+    /// standard JSON number can represent exactly.
+    private func runLint() {
+        fixNotes = []
+        lintNotes = []
+        let parser = JSONParser(inputText, lenient: false)
+        do {
+            _ = try parser.parse()
+            lintNotes = parser.lintWarnings.map { "Line \($0.line), Col \($0.column): \($0.message)" }
+            statusKind = .success
+            statusTitle = lintNotes.isEmpty ? "✓ No lint issues found" : "⚠ \(lintNotes.count) lint warning(s)"
+            statusDetail = ""
+        } catch let e as JSONParseError {
+            showParseError(e, prefix: "Fix this first, then Lint:\n", source: inputText)
+        } catch {
+            showGenericError(error)
+        }
+    }
+
     private func runFormat() {
         fixNotes = []
+        lintNotes = []
         do {
             let node = try JSONParser(inputText, lenient: false).parse()
             outputText = JSONSerializer.serialize(node, indentWidth: indentWidth)
@@ -213,6 +262,7 @@ struct ContentView: View {
     }
 
     private func runAutoFix() {
+        lintNotes = []
         let parser = JSONParser(inputText, lenient: true)
         do {
             let node = try parser.parse()
@@ -231,6 +281,7 @@ struct ContentView: View {
 
     private func runFlatten() {
         fixNotes = []
+        lintNotes = []
         do {
             let node = try JSONParser(inputText, lenient: false).parse()
             let flat = JSONFlatten.flatten(node)
@@ -247,6 +298,7 @@ struct ContentView: View {
 
     private func runUnflatten() {
         fixNotes = []
+        lintNotes = []
         do {
             let node = try JSONParser(inputText, lenient: false).parse()
             let nested = JSONFlatten.unflatten(node)
@@ -266,6 +318,7 @@ struct ContentView: View {
     /// conflicts, non-matching keys from either side are kept.
     private func performMerge(with overlayText: String) {
         fixNotes = []
+        lintNotes = []
         let baseNode: JSONNode
         do {
             baseNode = try JSONParser(inputText, lenient: false).parse()
@@ -307,6 +360,7 @@ struct ContentView: View {
             statusKind = .none
             statusDetail = ""
             fixNotes = []
+            lintNotes = []
         } catch {
             showGenericError(error)
         }
@@ -343,6 +397,7 @@ struct ContentView: View {
         openedFileURL = nil
         statusKind = .none
         fixNotes = []
+        lintNotes = []
     }
 
     private func copyOutput() {

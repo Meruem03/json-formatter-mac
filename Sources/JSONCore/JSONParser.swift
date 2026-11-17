@@ -13,6 +13,15 @@ public struct AutoFixNote {
     public let column: Int
 }
 
+/// A problem that's valid JSON syntax but is very likely a bug in the
+/// data itself (lint, not a syntax error) — collected during parsing
+/// regardless of strict/lenient mode.
+public struct LintWarning {
+    public let message: String
+    public let line: Int
+    public let column: Int
+}
+
 /// A single hand-written JSON parser used in two modes:
 /// - strict: rejects anything that isn't valid JSON, with a precise
 ///   line/column and a human suggestion for what to change.
@@ -26,6 +35,7 @@ public final class JSONParser {
     private var col: Int = 1
     private let lenient: Bool
     public private(set) var fixes: [AutoFixNote] = []
+    public private(set) var lintWarnings: [LintWarning] = []
     private var depth = 0
     /// Recursion-depth ceiling. Each `{` or `[` costs a few stack frames;
     /// without a limit, pathologically deep input (or a tiny stack on a
@@ -92,6 +102,27 @@ public final class JSONParser {
 
     private func recordFix(_ message: String) {
         fixes.append(AutoFixNote(message: message, line: line, column: col))
+    }
+
+    private func recordLint(_ message: String, line: Int, column: Int) {
+        lintWarnings.append(LintWarning(message: message, line: line, column: column))
+    }
+
+    /// Flags integers with more significant digits than a standard
+    /// JSON number can represent exactly. Most JSON consumers (notably
+    /// JavaScript) parse every number as a 64-bit float, which only has
+    /// ~15-17 reliable decimal digits — a large ID (Snowflake IDs,
+    /// int64 primary keys, ...) can silently come out rounded.
+    private func checkNumberPrecision(_ raw: String, line: Int, column: Int) {
+        guard !raw.contains(".") && !raw.lowercased().contains("e") else { return }
+        let digits = raw.hasPrefix("-") ? String(raw.dropFirst()) : raw
+        if digits.count > 15 {
+            recordLint(
+                "Number \(raw) has more digits than a standard JSON number can represent exactly — JavaScript and some other JSON consumers may silently round it",
+                line: line,
+                column: column
+            )
+        }
     }
 
     // MARK: - Whitespace & comments
@@ -271,6 +302,8 @@ public final class JSONParser {
 
         while true {
             try skipWhitespaceAndComments()
+            let keyLine = line
+            let keyCol = col
             let key = try parseKey()
             try skipWhitespaceAndComments()
             guard current() == ":" else {
@@ -282,6 +315,13 @@ public final class JSONParser {
             advance()
             try skipWhitespaceAndComments()
             let value = try parseValue()
+            if pairs.contains(where: { $0.0 == key }) {
+                recordLint(
+                    "Duplicate key \"\(key)\" in this object — most JSON parsers silently keep only the last value and discard the earlier one(s)",
+                    line: keyLine,
+                    column: keyCol
+                )
+            }
             pairs.append((key, value))
             try skipWhitespaceAndComments()
 
@@ -549,6 +589,7 @@ public final class JSONParser {
 
         let strictPattern = #"^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$"#
         if raw.range(of: strictPattern, options: .regularExpression) != nil {
+            checkNumberPrecision(raw, line: startLine, column: startCol)
             return .number(raw)
         }
 
@@ -587,6 +628,7 @@ public final class JSONParser {
 
             if fixed.range(of: strictPattern, options: .regularExpression) != nil {
                 for n in notes { recordFix("Fixed number '\(raw)': \(n)") }
+                checkNumberPrecision(fixed, line: startLine, column: startCol)
                 return .number(fixed)
             }
             if Double(raw) != nil {

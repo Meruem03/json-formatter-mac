@@ -4,7 +4,8 @@ A native macOS app for validating, fixing, formatting, and reshaping JSON.
 
 ## Features
 
-- **Validate** — strict JSON check that reports the exact line/column of the first problem and a plain-English suggestion for what to change. Also catches invisible Unicode whitespace left over from copy-pasting (zero-width spaces, BOM, non-breaking spaces, ...), which otherwise produces a confusing unrelated error.
+- **Validate** — strict JSON check that reports the exact line/column of the first problem and a plain-English suggestion for what to change. Handles Windows-style CRLF line endings correctly, and catches invisible Unicode whitespace left over from copy-pasting (zero-width spaces, BOM, non-breaking spaces, ...) and `//`/`/* */` comments with a specific, clear message instead of a confusing unrelated error.
+- **Lint** — flags things that are *valid* JSON but are almost always a bug: duplicate keys in the same object (most parsers silently keep only the last one and discard the rest) and integers with more digits than a standard JSON number can represent exactly (large IDs that some JSON consumers, notably JavaScript, will silently round).
 - **Auto-Fix** — tolerates and repairs common mistakes: trailing commas, single-quoted strings, unquoted object keys, Python-style `True`/`False`/`None`, `//` and `/* */` comments, invisible whitespace from pasting. Lists every fix it made.
 - **Format** — pretty-prints with 2-space, 4-space, or compact indentation.
 - **Flatten / Unflatten** — converts `{"user":{"name":"x"}}` ⇄ `{"user.name":"x"}`, fully reversible.

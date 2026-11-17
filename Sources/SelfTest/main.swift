@@ -232,5 +232,53 @@ do {
     check("comments + CRLF + trailing comma threw unexpectedly: \(error)", false)
 }
 
+// 16. Lint: a duplicate key within the same object is valid JSON but
+//    almost always a bug (most parsers silently keep only the last
+//    value) -- it should be flagged, without changing how the document
+//    parses or serializes.
+do {
+    let text = "{\"a\": 1, \"b\": 2, \"a\": 3}"
+    let parser = JSONParser(text, lenient: false)
+    let node = try parser.parse()
+    check("duplicate key is flagged", parser.lintWarnings.contains { $0.message.contains("Duplicate key \"a\"") })
+    check("duplicate key doesn't change parsing", JSONSerializer.serialize(node, indentWidth: 0) == "{\"a\":1,\"b\":2,\"a\":3}")
+} catch {
+    check("duplicate key test threw unexpectedly: \(error)", false)
+}
+do {
+    // No duplicates -- no warning.
+    let parser = JSONParser("{\"a\": 1, \"b\": 2}", lenient: false)
+    _ = try parser.parse()
+    check("no false positive when there's no duplicate key", parser.lintWarnings.isEmpty)
+} catch {
+    check("no-duplicate test threw unexpectedly: \(error)", false)
+}
+do {
+    // Duplicate keys in DIFFERENT (sibling/nested) objects are not a
+    // problem and shouldn't be flagged.
+    let parser = JSONParser("{\"a\": {\"id\": 1}, \"b\": {\"id\": 2}}", lenient: false)
+    _ = try parser.parse()
+    check("same key name in different objects isn't flagged", parser.lintWarnings.isEmpty)
+} catch {
+    check("sibling-objects test threw unexpectedly: \(error)", false)
+}
+
+// 17. Lint: an integer with more digits than a double can represent
+//    exactly (e.g. a Snowflake ID) gets flagged; ordinary numbers don't.
+do {
+    let parser = JSONParser("{\"id\": 123456789012345678}", lenient: false)
+    _ = try parser.parse()
+    check("large integer precision loss is flagged", parser.lintWarnings.contains { $0.message.contains("123456789012345678") })
+} catch {
+    check("large integer test threw unexpectedly: \(error)", false)
+}
+do {
+    let parser = JSONParser("{\"count\": 42, \"price\": 19.99}", lenient: false)
+    _ = try parser.parse()
+    check("ordinary numbers aren't flagged for precision loss", parser.lintWarnings.isEmpty)
+} catch {
+    check("ordinary numbers test threw unexpectedly: \(error)", false)
+}
+
 print(failures == 0 ? "\nALL TESTS PASSED" : "\n\(failures) TEST(S) FAILED")
 exit(failures == 0 ? 0 : 1)
