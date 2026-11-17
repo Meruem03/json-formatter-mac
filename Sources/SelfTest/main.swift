@@ -138,5 +138,30 @@ do {
     check("deep merge threw unexpectedly: \(error)", false)
 }
 
+// 11. A zero-width space pasted in from somewhere else (right after the
+//    opening brace, exactly like a real clipboard paste can produce) used
+//    to make the parser miscount and report a confusing "expected object
+//    key" error. Strict mode should now name the invisible character
+//    specifically; lenient mode should just strip it and say so.
+do {
+    let text = "{\u{200B}\n  \"a\": 1\n}"
+    _ = try JSONParser(text, lenient: false).parse()
+    check("invisible whitespace rejected strictly with a clear message", false)
+} catch let e as JSONParseError {
+    check("invisible whitespace rejected strictly with a clear message", e.message.contains("invisible character") && e.message.contains("U+200B"))
+} catch {
+    check("invisible whitespace rejected strictly with a clear message", false)
+}
+do {
+    let text = "{\u{200B}\n  \"a\": 1\n}"
+    let parser = JSONParser(text, lenient: true)
+    let node = try parser.parse()
+    let out = JSONSerializer.serialize(node, indentWidth: 0)
+    check("invisible whitespace auto-fixed", out == "{\"a\":1}")
+    check("invisible whitespace auto-fix was logged", parser.fixes.contains { $0.message.contains("invisible") })
+} catch {
+    check("invisible whitespace auto-fix threw unexpectedly: \(error)", false)
+}
+
 print(failures == 0 ? "\nALL TESTS PASSED" : "\n\(failures) TEST(S) FAILED")
 exit(failures == 0 ? 0 : 1)

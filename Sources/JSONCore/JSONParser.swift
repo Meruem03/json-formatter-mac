@@ -39,9 +39,9 @@ public final class JSONParser {
     }
 
     public func parse() throws -> JSONNode {
-        skipWhitespaceAndComments()
+        try skipWhitespaceAndComments()
         let value = try parseValue()
-        skipWhitespaceAndComments()
+        try skipWhitespaceAndComments()
         if pos < chars.count {
             throw error(
                 "Unexpected extra content after the JSON value",
@@ -86,11 +86,48 @@ public final class JSONParser {
 
     // MARK: - Whitespace & comments
 
-    private func skipWhitespaceAndComments() {
+    /// Unicode "space" and zero-width/format characters that aren't valid
+    /// JSON whitespace but routinely sneak in from copy-pasting (from
+    /// rich text, web pages, chat apps, PDFs, a BOM at the start of a
+    /// file, ...). A pasted document otherwise identical to valid JSON
+    /// fails with a confusing "expected key/value" error at the exact
+    /// point one of these sits, because it isn't recognized as either
+    /// whitespace or a token start.
+    private static let invisibleWhitespaceScalars: Set<UInt32> = [
+        0x00A0, 0x1680,
+        0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200A,
+        0x200B, 0x200C, 0x200D,
+        0x2028, 0x2029,
+        0x202F, 0x205F,
+        0x2060,
+        0x3000,
+        0xFEFF
+    ]
+
+    private func invisibleWhitespaceScalar(at c: Character) -> Unicode.Scalar? {
+        guard c.unicodeScalars.count == 1, let scalar = c.unicodeScalars.first,
+              JSONParser.invisibleWhitespaceScalars.contains(scalar.value) else { return nil }
+        return scalar
+    }
+
+    private func skipWhitespaceAndComments() throws {
         while let c = current() {
             if c == " " || c == "\t" || c == "\n" || c == "\r" {
                 advance()
                 continue
+            }
+            if let scalar = invisibleWhitespaceScalar(at: c) {
+                let hex = String(format: "U+%04X", scalar.value)
+                if lenient {
+                    recordFix("Removed an invisible/non-standard space character (\(hex)), likely left over from copy-pasting")
+                    advance()
+                    continue
+                } else {
+                    throw error(
+                        "Found an invisible character (\(hex)) here, which isn't valid JSON whitespace",
+                        suggestion: "This is usually left over from copy-pasting from a web page, chat app, or rich text. Delete it, or use Auto-Fix to remove it automatically."
+                    )
+                }
             }
             if c == "/" && peek(1) == "/" {
                 if !lenient {
@@ -128,7 +165,7 @@ public final class JSONParser {
     }
 
     private func parseValue() throws -> JSONNode {
-        skipWhitespaceAndComments()
+        try skipWhitespaceAndComments()
         guard let c = current() else {
             throw error(
                 "Unexpected end of input — expected a value",
@@ -155,10 +192,10 @@ public final class JSONParser {
                 )
             }
         case "/" where lenient && peek(1) == "/":
-            skipWhitespaceAndComments()
+            try skipWhitespaceAndComments()
             return try parseValue()
         case "/" where lenient && peek(1) == "*":
-            skipWhitespaceAndComments()
+            try skipWhitespaceAndComments()
             return try parseValue()
         default:
             if c.isNumber || c == "-" {
@@ -210,15 +247,15 @@ public final class JSONParser {
             throw error("JSON is nested too deeply (over \(maxDepth) levels)", suggestion: "This is likely malformed or an extreme edge case rather than real data.")
         }
         advance() // consume '{'
-        skipWhitespaceAndComments()
+        try skipWhitespaceAndComments()
         var pairs: [(String, JSONNode)] = []
 
         if current() == "}" { advance(); return .object(pairs) }
 
         while true {
-            skipWhitespaceAndComments()
+            try skipWhitespaceAndComments()
             let key = try parseKey()
-            skipWhitespaceAndComments()
+            try skipWhitespaceAndComments()
             guard current() == ":" else {
                 throw error(
                     "Expected ':' after key \"\(key)\"",
@@ -226,14 +263,14 @@ public final class JSONParser {
                 )
             }
             advance()
-            skipWhitespaceAndComments()
+            try skipWhitespaceAndComments()
             let value = try parseValue()
             pairs.append((key, value))
-            skipWhitespaceAndComments()
+            try skipWhitespaceAndComments()
 
             if current() == "," {
                 advance()
-                skipWhitespaceAndComments()
+                try skipWhitespaceAndComments()
                 if current() == "}" {
                     if lenient {
                         advance()
@@ -271,20 +308,20 @@ public final class JSONParser {
             throw error("JSON is nested too deeply (over \(maxDepth) levels)", suggestion: "This is likely malformed or an extreme edge case rather than real data.")
         }
         advance() // consume '['
-        skipWhitespaceAndComments()
+        try skipWhitespaceAndComments()
         var items: [JSONNode] = []
 
         if current() == "]" { advance(); return .array(items) }
 
         while true {
-            skipWhitespaceAndComments()
+            try skipWhitespaceAndComments()
             let value = try parseValue()
             items.append(value)
-            skipWhitespaceAndComments()
+            try skipWhitespaceAndComments()
 
             if current() == "," {
                 advance()
-                skipWhitespaceAndComments()
+                try skipWhitespaceAndComments()
                 if current() == "]" {
                     if lenient {
                         advance()
