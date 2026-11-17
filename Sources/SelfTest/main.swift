@@ -187,5 +187,50 @@ do {
     check("CRLF line numbers stay accurate on error", false)
 }
 
+// 13. Auto-Fix strips // and /* */ comments correctly in every position
+//    (leading, trailing, between properties, inside arrays, adjacent to
+//    trailing commas, combined with CRLF line endings, no space before
+//    the slashes, no trailing newline at EOF).
+let commentCases: [(String, String, String)] = [
+    ("leading comment", "// top comment\n{\"a\": 1}", "{\"a\":1}"),
+    ("trailing comment after value", "{\"a\": 1} // trailing", "{\"a\":1}"),
+    ("comment before value", "{\"a\": // comment\n1}", "{\"a\":1}"),
+    ("comment between props", "{\"a\": 1, // c1\n\"b\": 2}", "{\"a\":1,\"b\":2}"),
+    ("comment inside array", "[1, // c1\n2]", "[1,2]"),
+    ("comment with no trailing newline at EOF", "{\"a\": 1} //trailing no newline", "{\"a\":1}"),
+    ("block comment", "{/* c */\"a\": 1}", "{\"a\":1}"),
+    ("comment with no space before //", "{\"a\": 1}// no space", "{\"a\":1}"),
+]
+for (name, text, expected) in commentCases {
+    do {
+        let node = try JSONParser(text, lenient: true).parse()
+        check("auto-fix handles: \(name)", JSONSerializer.serialize(node, indentWidth: 0) == expected)
+    } catch {
+        check("auto-fix handles: \(name) (threw \(error))", false)
+    }
+}
+
+// 14. In strict mode, a comment should be named specifically as the
+//    problem rather than producing an unrelated generic error.
+do {
+    _ = try JSONParser("{\"a\": 1} // trailing", lenient: false).parse()
+    check("strict mode names a // comment as the problem", false)
+} catch let e as JSONParseError {
+    check("strict mode names a // comment as the problem", e.message.contains("comment"))
+} catch {
+    check("strict mode names a // comment as the problem", false)
+}
+
+// 15. Comments combined with CRLF line endings and a trailing comma (the
+//    shape of a real-world Windows/.NET config file with notes added).
+do {
+    let text = "{\r\n  \"Settings\": { // settings block\r\n    \"BatchSize\": \"500\", // batch size\r\n  },\r\n  \"Other\": 1 // trailing\r\n}"
+    let node = try JSONParser(text, lenient: true).parse()
+    let out = JSONSerializer.serialize(node, indentWidth: 0)
+    check("comments + CRLF + trailing comma all auto-fix together", out == "{\"Settings\":{\"BatchSize\":\"500\"},\"Other\":1}")
+} catch {
+    check("comments + CRLF + trailing comma threw unexpectedly: \(error)", false)
+}
+
 print(failures == 0 ? "\nALL TESTS PASSED" : "\n\(failures) TEST(S) FAILED")
 exit(failures == 0 ? 0 : 1)

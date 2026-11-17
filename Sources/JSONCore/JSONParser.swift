@@ -141,15 +141,22 @@ public final class JSONParser {
             }
             if c == "/" && peek(1) == "/" {
                 if !lenient {
-                    // Leave it; caller context will produce a clear error.
-                    return
+                    throw error(
+                        "Found a '//' comment here, which isn't valid in standard JSON",
+                        suggestion: "Remove it, or click Auto-Fix to strip comments automatically."
+                    )
                 }
                 recordFix("Removed '//' comment")
                 while let c2 = current(), c2 != "\n" { advance() }
                 continue
             }
             if c == "/" && peek(1) == "*" {
-                if !lenient { return }
+                if !lenient {
+                    throw error(
+                        "Found a '/* ... */' comment here, which isn't valid in standard JSON",
+                        suggestion: "Remove it, or click Auto-Fix to strip comments automatically."
+                    )
+                }
                 recordFix("Removed '/* ... */' comment")
                 advance(); advance()
                 while current() != nil && !(current() == "*" && peek(1) == "/") { advance() }
