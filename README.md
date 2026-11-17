@@ -4,11 +4,13 @@ A native macOS app for validating, fixing, formatting, and reshaping JSON.
 
 ## Features
 
-- **Validate** — strict JSON check that reports the exact line/column of the first problem and a plain-English suggestion for what to change.
-- **Auto-Fix** — tolerates and repairs common mistakes: trailing commas, single-quoted strings, unquoted object keys, Python-style `True`/`False`/`None`, `//` and `/* */` comments. Lists every fix it made.
+- **Validate** — strict JSON check that reports the exact line/column of the first problem and a plain-English suggestion for what to change. Also catches invisible Unicode whitespace left over from copy-pasting (zero-width spaces, BOM, non-breaking spaces, ...), which otherwise produces a confusing unrelated error.
+- **Auto-Fix** — tolerates and repairs common mistakes: trailing commas, single-quoted strings, unquoted object keys, Python-style `True`/`False`/`None`, `//` and `/* */` comments, invisible whitespace from pasting. Lists every fix it made.
 - **Format** — pretty-prints with 2-space, 4-space, or compact indentation.
 - **Flatten / Unflatten** — converts `{"user":{"name":"x"}}` ⇄ `{"user.name":"x"}`, fully reversible.
+- **Merge With…** — paste a second JSON (e.g. `appsecrets.json`) and deep-merge it into Input (e.g. `appsettings.json`): matching keys recurse, the pasted JSON wins on conflicts, everything else on either side is kept.
 - Line-numbered, syntax-highlighted editor (light/dark mode aware).
+- Clear button on both the Input and Output panes.
 - Open/Save files (⌘O, ⌘S, ⇧⌘S). The last session's input and indent setting persist across launches.
 
 ## Just want to use the app?
