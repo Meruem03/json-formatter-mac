@@ -117,5 +117,26 @@ do {
     check("extreme nesting rejected", false)
 }
 
+// 10. Deep merge: overlay fills in a new key, overrides a matching nested
+//    key, and replaces an array outright, while leaving untouched keys be.
+do {
+    let settings = """
+    {"ConnectionStrings":{"Default":"Server=prod"},"Logging":{"Level":"Info"},"Tags":["a","b"]}
+    """
+    let secrets = """
+    {"ConnectionStrings":{"Default":"Server=prod;Password=xxx","Backup":"Server=dr"},"Tags":["c"]}
+    """
+    let baseNode = try JSONParser(settings, lenient: false).parse()
+    let overlayNode = try JSONParser(secrets, lenient: false).parse()
+    let merged = JSONMerge.merge(base: baseNode, overlay: overlayNode)
+    let out = JSONSerializer.serialize(merged, indentWidth: 0)
+    check("merge overrides a matching nested key", out.contains("\"Default\":\"Server=prod;Password=xxx\""))
+    check("merge appends a new nested key", out.contains("\"Backup\":\"Server=dr\""))
+    check("merge keeps an untouched key", out.contains("\"Logging\":{\"Level\":\"Info\"}"))
+    check("merge replaces an array outright", out.contains("\"Tags\":[\"c\"]") && !out.contains("\"a\""))
+} catch {
+    check("deep merge threw unexpectedly: \(error)", false)
+}
+
 print(failures == 0 ? "\nALL TESTS PASSED" : "\n\(failures) TEST(S) FAILED")
 exit(failures == 0 ? 0 : 1)

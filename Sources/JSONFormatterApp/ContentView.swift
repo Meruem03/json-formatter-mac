@@ -27,9 +27,12 @@ struct ContentView: View {
     @State private var statusDetail: String = ""
     @State private var fixNotes: [String] = []
 
+    @State private var showMergeSheet = false
+    @State private var mergeOverlayText = ""
+
     static let sampleInput = """
     {
-      name: 'Ilia',
+      name: 'Jane Doe',
       "age": 29,
       "active": True,
       "tags": ["swift", "macos",],
@@ -47,14 +50,24 @@ struct ContentView: View {
                 fixesView
             }
             HSplitView {
-                editorPane(title: inputPaneTitle, text: $inputText)
-                editorPane(title: outputPaneTitle, text: $outputText)
+                editorPane(title: inputPaneTitle, text: $inputText) {
+                    openedFileURL = nil
+                    statusKind = .none
+                    statusDetail = ""
+                    fixNotes = []
+                }
+                editorPane(title: outputPaneTitle, text: $outputText) {
+                    outputSaveURL = nil
+                }
             }
         }
         .padding()
         .onReceive(NotificationCenter.default.publisher(for: .jfOpenFile)) { _ in openFile() }
         .onReceive(NotificationCenter.default.publisher(for: .jfSaveOutput)) { _ in saveOutput() }
         .onReceive(NotificationCenter.default.publisher(for: .jfSaveOutputAs)) { _ in saveOutputAs() }
+        .sheet(isPresented: $showMergeSheet) {
+            MergeSheetView(overlayText: $mergeOverlayText, onMerge: performMerge)
+        }
     }
 
     private var inputPaneTitle: String {
@@ -96,6 +109,10 @@ struct ContentView: View {
             Divider().frame(height: 18)
             Button("Flatten", action: runFlatten)
             Button("Unflatten", action: runUnflatten)
+            Button("Merge With…") {
+                mergeOverlayText = ""
+                showMergeSheet = true
+            }
             Spacer()
             Button("Use Output as Input", action: useOutputAsInput)
                 .disabled(outputText.isEmpty)
@@ -145,9 +162,18 @@ struct ContentView: View {
 
     // MARK: - Editors
 
-    private func editorPane(title: String, text: Binding<String>) -> some View {
+    private func editorPane(title: String, text: Binding<String>, onClear: @escaping () -> Void = {}) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.headline)
+            HStack {
+                Text(title).font(.headline)
+                Spacer()
+                Button("Clear") {
+                    text.wrappedValue = ""
+                    onClear()
+                }
+                .font(.caption)
+                .disabled(text.wrappedValue.isEmpty)
+            }
             CodeEditor(text: text)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .border(Color.gray.opacity(0.3))
@@ -165,7 +191,7 @@ struct ContentView: View {
             statusTitle = "✓ Valid JSON"
             statusDetail = ""
         } catch let e as JSONParseError {
-            showParseError(e)
+            showParseError(e, source: inputText)
         } catch {
             showGenericError(error)
         }
@@ -180,7 +206,7 @@ struct ContentView: View {
             statusTitle = "✓ Formatted"
             statusDetail = ""
         } catch let e as JSONParseError {
-            showParseError(e)
+            showParseError(e, source: inputText)
         } catch {
             showGenericError(error)
         }
@@ -197,7 +223,7 @@ struct ContentView: View {
             statusDetail = ""
         } catch let e as JSONParseError {
             fixNotes = parser.fixes.map { "Line \($0.line), Col \($0.column): \($0.message)" }
-            showParseError(e, prefix: "Couldn't fully auto-fix — one problem needs a manual change:\n")
+            showParseError(e, prefix: "Couldn't fully auto-fix — one problem needs a manual change:\n", source: inputText)
         } catch {
             showGenericError(error)
         }
@@ -213,7 +239,7 @@ struct ContentView: View {
             statusTitle = "✓ Flattened"
             statusDetail = ""
         } catch let e as JSONParseError {
-            showParseError(e, prefix: "Fix this first, then Flatten:\n")
+            showParseError(e, prefix: "Fix this first, then Flatten:\n", source: inputText)
         } catch {
             showGenericError(error)
         }
@@ -229,10 +255,42 @@ struct ContentView: View {
             statusTitle = "✓ Unflattened"
             statusDetail = ""
         } catch let e as JSONParseError {
-            showParseError(e, prefix: "Fix this first, then Unflatten:\n")
+            showParseError(e, prefix: "Fix this first, then Unflatten:\n", source: inputText)
         } catch {
             showGenericError(error)
         }
+    }
+
+    /// Deep-merges `overlayText` (e.g. appsecrets.json) into Input (e.g.
+    /// appsettings.json): matching keys recurse and overlay wins on
+    /// conflicts, non-matching keys from either side are kept.
+    private func performMerge(with overlayText: String) {
+        fixNotes = []
+        let baseNode: JSONNode
+        do {
+            baseNode = try JSONParser(inputText, lenient: false).parse()
+        } catch let e as JSONParseError {
+            showParseError(e, prefix: "Fix Input first, then merge:\n", source: inputText)
+            return
+        } catch {
+            showGenericError(error)
+            return
+        }
+        let overlayNode: JSONNode
+        do {
+            overlayNode = try JSONParser(overlayText, lenient: false).parse()
+        } catch let e as JSONParseError {
+            showParseError(e, prefix: "The pasted JSON to merge has a problem:\n", source: overlayText)
+            return
+        } catch {
+            showGenericError(error)
+            return
+        }
+        let merged = JSONMerge.merge(base: baseNode, overlay: overlayNode)
+        outputText = JSONSerializer.serialize(merged, indentWidth: indentWidth)
+        statusKind = .success
+        statusTitle = "✓ Merged"
+        statusDetail = ""
     }
 
     private func openFile() {
@@ -295,14 +353,14 @@ struct ContentView: View {
 
     // MARK: - Error presentation
 
-    private func showParseError(_ e: JSONParseError, prefix: String = "") {
+    private func showParseError(_ e: JSONParseError, prefix: String = "", source: String) {
         statusKind = .error
         statusTitle = "✗ Problem at line \(e.line), column \(e.column)"
         var detail = prefix + e.message
         if let suggestion = e.suggestion {
             detail += "\nFix: \(suggestion)"
         }
-        detail += "\n\n" + errorSnippet(line: e.line, column: e.column)
+        detail += "\n\n" + errorSnippet(line: e.line, column: e.column, in: source)
         statusDetail = detail
     }
 
@@ -312,8 +370,8 @@ struct ContentView: View {
         statusDetail = error.localizedDescription
     }
 
-    private func errorSnippet(line: Int, column: Int) -> String {
-        let lines = inputText.components(separatedBy: "\n")
+    private func errorSnippet(line: Int, column: Int, in source: String) -> String {
+        let lines = source.components(separatedBy: "\n")
         guard line - 1 >= 0, line - 1 < lines.count else { return "" }
         let lineText = lines[line - 1]
         let caretCount = max(0, column - 1)
