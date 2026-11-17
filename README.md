@@ -11,20 +11,19 @@ A native macOS app for validating, fixing, formatting, and reshaping JSON.
 - Line-numbered, syntax-highlighted editor (light/dark mode aware).
 - Open/Save files (⌘O, ⌘S, ⇧⌘S). The last session's input and indent setting persist across launches.
 
-## Using a prebuilt `.app`
+## Just want to use the app?
 
-If you already have `JSON Formatter.app` (copied from another Mac, a zip, etc.), just double-click it.
+Don't build from source — download the prebuilt app from **[Releases](https://github.com/Meruem03/json-formatter-mac/releases/latest)**. No Xcode required, works on any Mac (Apple Silicon or Intel):
 
-It's only ad-hoc signed — there's no paid Apple Developer ID behind it — so the first time you open it, macOS will likely say it "cannot verify the developer." That's expected:
+1. Download `JSON Formatter.zip` from the latest release and unzip it.
+2. Move `JSON Formatter.app` to Applications (or anywhere).
+3. **Right-click the app → Open → confirm Open.** (First launch only — it's ad-hoc signed, not notarized with a paid Apple Developer ID, so Gatekeeper warns once. If it's already been blocked: **System Settings → Privacy & Security → scroll down → Open Anyway**.)
 
-- Right-click (or Control-click) the app → **Open** → confirm **Open**, or
-- If it's already been blocked once: **System Settings → Privacy & Security → scroll down → Open Anyway**
-
-You only need to do this once per Mac.
+Building from source is only needed if you want to modify the code.
 
 ## Building from source
 
-Requires the full **Xcode** app (not just the Command Line Tools) — needed to build, not to run an already-built `.app`.
+Requires the full **Xcode app** (not just the Command Line Tools) — if Xcode isn't installed, use the Release download above instead; building won't work without it.
 
 ```bash
 git clone https://github.com/Meruem03/json-formatter-mac.git
