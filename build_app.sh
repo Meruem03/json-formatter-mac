@@ -10,10 +10,16 @@ BIN_NAME="JSONFormatterApp"
 APP_DIR="build/${APP_NAME}.app"
 VERSION="1.0"
 
-echo "==> Building universal (Apple Silicon + Intel) release binary"
-swift build -c release --arch arm64 --arch x86_64 --product "$BIN_NAME"
+# Use Xcode's own toolchain explicitly. If a standalone `swift` (e.g. from
+# Homebrew) is ahead of Xcode's on PATH, a universal (arm64+x86_64) build
+# fails with "symbol(s) not found for architecture x86_64" because the two
+# toolchains' standard libraries don't line up.
+SWIFT="xcrun swift"
 
-BIN_PATH=$(swift build -c release --arch arm64 --arch x86_64 --product "$BIN_NAME" --show-bin-path)/$BIN_NAME
+echo "==> Building universal (Apple Silicon + Intel) release binary"
+$SWIFT build -c release --arch arm64 --arch x86_64 --product "$BIN_NAME"
+
+BIN_PATH=$($SWIFT build -c release --arch arm64 --arch x86_64 --product "$BIN_NAME" --show-bin-path)/$BIN_NAME
 
 echo "==> Assembling app bundle at $APP_DIR"
 rm -rf "$APP_DIR"
