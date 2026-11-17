@@ -163,5 +163,29 @@ do {
     check("invisible whitespace auto-fix threw unexpectedly: \(error)", false)
 }
 
+// 12. Windows-style CRLF line endings (very common in pasted .NET config
+//    files) used to fail entirely: Swift's Character treats "\r\n" as one
+//    grapheme cluster that equals neither "\n" nor "\r", so it was never
+//    recognized as whitespace, and every line was miscounted as line 1.
+do {
+    let text = "{\r\n  \"a\": 1,\r\n  \"b\": {\r\n    \"c\": 2\r\n  }\r\n}\r\n"
+    let node = try JSONParser(text, lenient: false).parse()
+    let out = JSONSerializer.serialize(node, indentWidth: 0)
+    check("CRLF line endings parse as valid JSON", out == "{\"a\":1,\"b\":{\"c\":2}}")
+} catch {
+    check("CRLF line endings parse as valid JSON: threw \(error)", false)
+}
+do {
+    // A real error on a CRLF document should still report the correct
+    // line number, not be stuck at line 1 for the whole file.
+    let text = "{\r\n  \"a\": 1\r\n  \"b\": 2\r\n}"
+    _ = try JSONParser(text, lenient: false).parse()
+    check("CRLF line numbers stay accurate on error", false)
+} catch let e as JSONParseError {
+    check("CRLF line numbers stay accurate on error", e.line == 3)
+} catch {
+    check("CRLF line numbers stay accurate on error", false)
+}
+
 print(failures == 0 ? "\nALL TESTS PASSED" : "\n\(failures) TEST(S) FAILED")
 exit(failures == 0 ? 0 : 1)

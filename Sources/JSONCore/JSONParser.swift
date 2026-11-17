@@ -34,7 +34,17 @@ public final class JSONParser {
     private let maxDepth = 500
 
     public init(_ text: String, lenient: Bool) {
-        self.chars = Array(text)
+        // Swift's Character is an extended grapheme cluster, and "\r\n" is
+        // defined as a SINGLE cluster — it equals neither "\n" nor "\r" on
+        // their own. Character-by-character whitespace/newline checks
+        // below would silently fail to recognize Windows-style line
+        // endings (very common in pasted .NET config files, for example),
+        // so normalize to "\n" up front rather than special-casing every
+        // comparison.
+        let normalized = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        self.chars = Array(normalized)
         self.lenient = lenient
     }
 
